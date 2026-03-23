@@ -8,7 +8,7 @@ class ModelConfig:
     """Centralized configuration for the Tiny-Llama model."""
     vocab_size: int = 50257        # Default for GPT-2
     context_length: int = 8     # Known as BLOCK_SIZE
-    embedding_dim: int = 128      # Known as N_EMBED
+    embedding_dim: int = 16      # Known as N_EMBED
     num_heads: int = 4            # Number of parallel attention heads
     head_size: int = 32           # embedding_dim // num_heads
     use_bias: bool = False        # Modern LLMs (Llama) prefer bias=False
@@ -102,7 +102,7 @@ class Transformer(LanguageModel):
     def forward(self, x):
         tok = self.token_embedding(x)
         out = self.blocks(tok)
-        return self.lm_head(tok)
+        return self.lm_head(out)
 
 
 
