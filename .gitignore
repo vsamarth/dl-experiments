@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+.env
+.pytest_cache/
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+
+# Data & Models (Heavy files)
+data/
+*.pt
+*.pth
+*.h5
+*.ckpt
+*.weights
+*.model
+*.onnx
+*.pb
+
+# IDEs
+.vscode/
+.idea/
+.DS_Store
+
+# UV
+uv.lock
