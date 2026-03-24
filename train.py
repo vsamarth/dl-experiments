@@ -1,116 +1,93 @@
-import torch
-from torch import nn
+import torch, argparse, math
+from torch import nn, optim
 from torch.utils.data import DataLoader, IterableDataset
 from datasets import load_dataset
 from tokenizers import Tokenizer
 from tqdm import tqdm
-from torchmetrics.aggregation import MeanMetric
 from model import Transformer, Sampler
 from config import ModelConfig, TrainerConfig
-import argparse
-import math
 
 class StreamingStoryDataset(IterableDataset):
-    """Infinite token stream with specified split."""
+    """Infinite token stream yielding (x, y) pairs."""
     def __init__(self, tokenizer, context_length, split="train"):
         self.ds = load_dataset("roneneldan/TinyStories", streaming=True, split=split)
-        self.tokenizer = tokenizer
-        self.context_length = context_length
+        self.tok, self.ctx = tokenizer, context_length
 
     def __iter__(self):
-        buffer = []
-        for example in self.ds:
-            buffer.extend(self.tokenizer.encode(example["text"]).ids)
-            while len(buffer) >= self.context_length + 1:
-                chunk = buffer[:self.context_length + 1]
-                yield torch.tensor(chunk[:-1]), torch.tensor(chunk[1:])
-                buffer = buffer[self.context_length:]
-
-def train_step(model, optimizer, x, y):
-    """Executes a single training optimization step."""
-    optimizer.zero_grad(set_to_none=True)
-    logits, loss = model(x, y)
-    loss.backward()
-    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-    optimizer.step()
-    return loss
+        tokens = []
+        eot = self.tok.token_to_id("<|endoftext|>")
+        for ex in self.ds:
+            tokens.extend(self.tok.encode(ex["text"]).ids + [eot])
+            while len(tokens) > self.ctx:
+                yield torch.tensor(tokens[:self.ctx]), torch.tensor(tokens[1:self.ctx+1])
+                tokens = tokens[self.ctx:]
 
 @torch.no_grad()
-def eval_step(model, x, y):
-    """Executes a single evaluation forward pass."""
-    _, loss = model(x, y)
-    return loss
-
 def validate(model, loader, steps, device):
-    """Runs evaluation over a fixed number of validation batches."""
     model.eval()
-    loss_metric = MeanMetric().to(device)
-    for i, (x, y) in enumerate(loader):
-        if i >= steps: break
-        loss = eval_step(model, x.to(device), y.to(device))
-        loss_metric.update(loss)
+    losses = [model(x.to(device), y.to(device))[1].item() for i, (x, y) in enumerate(loader) if i < steps]
     model.train()
-    return loss_metric.compute().item()
+    return sum(losses) / len(losses) if losses else 0
 
-def train_model(t_config: TrainerConfig):
+def train(cfg: TrainerConfig):
     # Setup
-    tokenizer = Tokenizer.from_file("tokenizer.json")
-    m_config = ModelConfig(vocab_size=tokenizer.get_vocab_size())
-    model = Transformer(m_config).to(t_config.device)
-    if t_config.device == "cuda":
-        print("Compiling model with torch.compile...")
-        model = torch.compile(model)
+    tok = Tokenizer.from_file("tokenizer.json")
+    model = Transformer(ModelConfig(vocab_size=tok.get_vocab_size())).to(cfg.device)
+    if cfg.device == "cuda": model = torch.compile(model)
     
-    optimizer = torch.optim.AdamW(
-        model.parameters(), 
-        lr=t_config.learning_rate,
-        weight_decay=0.1,
-        betas=(0.9, 0.95)
-    )
-    train_loader = DataLoader(StreamingStoryDataset(tokenizer, m_config.context_length, "train"), batch_size=t_config.batch_size)
-    val_loader = DataLoader(StreamingStoryDataset(tokenizer, m_config.context_length, "validation"), batch_size=t_config.batch_size)
-    sampler = Sampler(model)
+    opt = optim.AdamW(model.parameters(), lr=cfg.learning_rate, weight_decay=cfg.weight_decay, betas=(cfg.beta1, cfg.beta2))
     
-    # Metrics
-    train_loss_metric = MeanMetric().to(t_config.device)
-    
-    print(f"Training on {t_config.device} ({sum(p.numel() for p in model.parameters())/1e6:.1f}M params)")
-    
-    model.train()
-    pbar = tqdm(enumerate(train_loader), total=t_config.max_steps, dynamic_ncols=True)
-    
-    for step, (x, y) in pbar:
-        if step >= t_config.max_steps: break
-        
-        loss = train_step(model, optimizer, x.to(t_config.device), y.to(t_config.device))
-        train_loss_metric.update(loss)
-        
-        # Logging
-        cur_loss = train_loss_metric.compute().item()
-        pbar.set_description(f"Loss: {cur_loss:.4f}")
-        
-        # Periodic Evaluation & Sampling
-        if step > 0 and step % t_config.eval_interval == 0:
-            val_loss = validate(model, val_loader, t_config.val_steps, t_config.device)
-            print(f"\n[Step {step}] Val Loss: {val_loss:.4f}")
-            
-            if t_config.show_samples:
-                model.eval()
-                ctx = torch.zeros((1, 1), dtype=torch.long, device=t_config.device)
-                out = sampler.sample(ctx, max_new_tokens=50)
-                print(f"Sample: {tokenizer.decode(out[0].cpu().numpy())}\n")
-                model.train()
-            
-            train_loss_metric.reset()
+    # Scheduler logic
+    warmup = int(cfg.warmup_ratio * cfg.max_steps)
+    def lr_fn(s):
+        if s < warmup: return s / max(1, warmup)
+        pct = (s - warmup) / max(1, cfg.max_steps - warmup)
+        return 0.1 + 0.9 * (0.5 * (1 + math.cos(math.pi * pct)))
+    sched = optim.lr_scheduler.LambdaLR(opt, lr_fn)
 
-    torch.save(model.state_dict(), t_config.save_path)
-    print(f"Saved to {t_config.save_path}")
+    # Data
+    train_loader = DataLoader(StreamingStoryDataset(tok, model.config.context_length), batch_size=cfg.batch_size)
+    val_loader = DataLoader(StreamingStoryDataset(tok, model.config.context_length, "validation"), batch_size=cfg.batch_size)
+    
+    print(f"Training {sum(p.numel() for p in model.parameters())/1e6:.1f}M params on {cfg.device}")
+    pbar = tqdm(enumerate(train_loader), total=cfg.max_steps, dynamic_ncols=True)
+    loss_history, val_loss = [], None
+
+    for step, (x, y) in pbar:
+        if step > cfg.max_steps: break
+        
+        # Train step
+        opt.zero_grad(set_to_none=True)
+        _, loss = model(x.to(cfg.device), y.to(cfg.device))
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        opt.step()
+        sched.step()
+        
+        loss_history.append(loss.item())
+        
+        # Eval & Logging
+        if step > 0 and (step % cfg.eval_interval == 0 or step == cfg.max_steps):
+            val_loss = validate(model, val_loader, cfg.val_steps, cfg.device)
+            loss_history = []
+
+        if loss_history:
+            desc = f"Loss: {sum(loss_history)/len(loss_history):.4f} | LR: {sched.get_last_lr()[0]:.2e}"
+            if val_loss: desc += f" | Val: {val_loss:.4f}"
+            pbar.set_description(desc)
+
+    # Wrap up
+    print("\n--- Final Sample (500 tokens) ---\n")
+    model.eval()
+    out = Sampler(model).sample(torch.zeros((1, 1), dtype=torch.long, device=cfg.device), 500)
+    print(f"{tok.decode(out[0].cpu().numpy())}\n")
+    
+    from safetensors.torch import save_file
+    save_file(model.state_dict(), cfg.save_path)
+    print(f"Saved to {cfg.save_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--steps", type=int, default=1000)
-    parser.add_argument("--samples", action="store_true")
     args = parser.parse_args()
-    
-    config = TrainerConfig(max_steps=args.steps, show_samples=args.samples)
-    train_model(config)
+    train(TrainerConfig(max_steps=args.steps))

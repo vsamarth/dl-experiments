@@ -4,6 +4,16 @@ from torch import nn
 from torch.nn import functional as F
 from config import ModelConfig
 
+def rotate_half(x):
+    """Rotates half the hidden dims of the input."""
+    x1, x2 = x.chunk(2, dim=-1)
+    return torch.cat((-x2, x1), dim=-1)
+
+def apply_rope(q, k, cos, sin):
+    """Applies RoPE to query and key tensors."""
+    # q, k: (B, nh, T, hs), cos, sin: (1, 1, T, hs)
+    return (q * cos) + (rotate_half(q) * sin), (k * cos) + (rotate_half(k) * sin)
+
 class MultiHeadAttention(nn.Module):
     def __init__(self, config: ModelConfig):
         super().__init__()
@@ -20,7 +30,7 @@ class MultiHeadAttention(nn.Module):
         self.n_head = config.num_heads
         self.n_embd = config.embedding_dim
 
-    def forward(self, x):
+    def forward(self, x, cos, sin):
         B, T, C = x.size() # Batch size, Sequence length, Embedding dim
 
         # Calculate Query, Key, Value for all heads in batch
@@ -30,6 +40,10 @@ class MultiHeadAttention(nn.Module):
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+
+        # Apply RoPE
+        q, k = apply_rope(q, k, cos, sin)
+
         y = F.scaled_dot_product_attention(
             q, k, v, 
             attn_mask=None, 
@@ -61,8 +75,8 @@ class Block(nn.Module):
         self.ln2 = nn.LayerNorm(config.embedding_dim, eps=1e-5)
         self.ffn = FeedForward(config)
 
-    def forward(self, x):
-        x = x + self.attn(self.ln1(x))
+    def forward(self, x, cos, sin):
+        x = x + self.attn(self.ln1(x), cos, sin)
         x = x + self.ffn(self.ln2(x))
         return x
 
@@ -71,14 +85,21 @@ class Transformer(nn.Module):
         super().__init__()
         self.config = config
         self.token_embedding = nn.Embedding(config.vocab_size, config.embedding_dim)
-        self.position_embedding = nn.Embedding(config.context_length, config.embedding_dim)
         self.drop = nn.Dropout(config.dropout)
-        self.blocks = nn.Sequential(*[Block(config) for _ in range(config.num_blocks)])
+        self.blocks = nn.ModuleList([Block(config) for _ in range(config.num_blocks)])
         self.ln_f = nn.LayerNorm(config.embedding_dim, eps=1e-5)
         self.lm_head = nn.Linear(config.embedding_dim, config.vocab_size, bias=False)
 
         # Weight tying
         self.token_embedding.weight = self.lm_head.weight
+
+        # RoPE precomputation
+        inv_freq = 1.0 / (10000**(torch.arange(0, config.head_size, 2).float() / config.head_size))
+        t = torch.arange(config.context_length)
+        freqs = torch.outer(t, inv_freq)
+        emb = torch.cat((freqs, freqs), dim=-1)
+        self.register_buffer("cos", emb.cos().view(1, 1, config.context_length, config.head_size))
+        self.register_buffer("sin", emb.sin().view(1, 1, config.context_length, config.head_size))
 
         # Professional initialization
         self.apply(self._init_weights)
@@ -95,10 +116,15 @@ class Transformer(nn.Module):
 
     def forward(self, idx, targets=None):
         B, T = idx.shape
-        tok_emb = self.token_embedding(idx)
-        pos_emb = self.position_embedding(torch.arange(T, device=idx.device))
-        x = self.drop(tok_emb + pos_emb)
-        x = self.blocks(x)
+        x = self.token_embedding(idx)
+        x = self.drop(x)
+        
+        cos = self.cos[:, :, :T, :]
+        sin = self.sin[:, :, :T, :]
+
+        for block in self.blocks:
+            x = block(x, cos, sin)
+            
         x = self.ln_f(x)
         logits = self.lm_head(x)
 

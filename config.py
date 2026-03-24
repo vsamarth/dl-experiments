@@ -20,8 +20,13 @@ class TrainerConfig:
     device: str = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     batch_size: int = 32
     learning_rate: float = 5e-4
-    max_steps: int = 10000
+    max_steps: int = 1000
     eval_interval: int = 200
     val_steps: int = 50
-    show_samples: bool = False
-    save_path: str = "model.pt"
+    save_path: str = "model.safetensors"
+    
+    # Optimizer settings
+    weight_decay: float = 0.1
+    beta1: float = 0.9
+    beta2: float = 0.95
+    warmup_ratio: float = 0.1

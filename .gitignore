@@ -1,32 +1,106 @@
-# Python
+# --- Python Core ---
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Environments ---
 .venv/
 venv/
+ENV/
 env/
 .env
-.pytest_cache/
+.venv.bak/
+venv.bak/
 
-# Jupyter Notebooks
+# --- Jupyter Notebooks ---
 .ipynb_checkpoints
+*/.ipynb_checkpoints/*
+*.ipynb_checkpoints
+.ipython/
 
-# Data & Models (Heavy files)
-data/
+# --- Machine Learning Artifacts ---
+# Model checkpoints and weights
 *.pt
 *.pth
-*.h5
 *.ckpt
+*.h5
 *.weights
 *.model
 *.onnx
 *.pb
+*.bin
+*.safetensors
+*.joblib
+*.pkl
+*.pickle
 
-# IDEs
+# Large Datasets
+data/
+datasets/
+corpus/
+*.csv
+*.tsv
+*.jsonl
+*.parquet
+*.h5
+*.hdf5
+*.npy
+*.npz
+
+# ML Framework Logs & Metadata
+wandb/
+tensorboard/
+runs/
+lightning_logs/
+.cache/
+.huggingface/
+
+# --- Project Specifics ---
+# If tokenizer.json is a large trained artifact, ignore it. 
+# If it's a small config file for the project, you might want to track it.
+# tokenizer.json
+
+# --- IDE & OS Specifics ---
 .vscode/
 .idea/
+*.swp
+*.swo
 .DS_Store
+AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
-# UV
+# --- Tools ---
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
 uv.lock
+# .python-version # Usually tracked, but uncomment to ignore if preferred
