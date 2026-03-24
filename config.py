@@ -3,13 +3,11 @@ from dataclasses import dataclass
 
 @dataclass
 class ModelConfig:
-    # "Deep but Thin" Configuration (~45M parameters)
-    # Shifts complexity from width (capacity) to depth (logic/composition)
     vocab_size: int = 4096
-    context_length: int = 256    # Requested: 256
-    embedding_dim: int = 384     # "Thin" width
-    num_heads: int = 6           # 384 / 6 = 64 head_size (Hardware friendly)
-    num_blocks: int = 24         # "Deep" stack for higher-order logic
+    context_length: int = 512
+    embedding_dim: int = 192
+    num_heads: int = 6
+    num_blocks: int = 24
     dropout: float = 0.1
     use_bias: bool = False
 
@@ -21,15 +19,13 @@ class ModelConfig:
 class TrainerConfig:
     device: str = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     
-    # 4090 can handle very large batches with a thin model and short context
-    batch_size: int = 256        # Doubled since model is thinner and context is shorter
-    learning_rate: float = 6e-4  # Thinner models can often handle slightly higher LRs
-    max_steps: int = 50000       
-    eval_interval: int = 500
+    batch_size: int = 256
+    learning_rate: float = 8e-4
+    max_steps: int = 50000
+    eval_interval: int = 1000
     val_steps: int = 100
     save_path: str = "model.safetensors"
     
-    # Optimizer settings
     weight_decay: float = 0.1
     beta1: float = 0.9
     beta2: float = 0.95
