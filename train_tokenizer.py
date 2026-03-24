@@ -21,7 +21,8 @@ def train(args):
     
     # Train using a streaming generator
     corpus = (ex[args.text_column] for ex in islice(ds, args.limit))
-    print(f"Training on up to {args.limit} samples with vocab size {args.vocab_size}...")
+    limit_str = args.limit if args.limit else "all"
+    print(f"Training on {limit_str} samples with vocab size {args.vocab_size}...")
     tokenizer.train_from_iterator(corpus, trainer=trainer)
     
     tokenizer.save(args.save_path)
@@ -33,7 +34,7 @@ if __name__ == "__main__":
     parser.add_argument("--split", type=str, default="train", help="Dataset split (default: train)")
     parser.add_argument("--text_column", type=str, default="text", help="Column name (default: text)")
     parser.add_argument("--vocab_size", type=int, default=4096, help="Vocab size (default: 4096)")
-    parser.add_argument("--limit", type=int, default=100000, help="Max samples (default: 100000)")
+    parser.add_argument("--limit", type=int, default=None, help="Max samples (default: all)")
     parser.add_argument("--save_path", type=str, default="tokenizer-bpe.json", help="Output path")
     
     train(parser.parse_args())
