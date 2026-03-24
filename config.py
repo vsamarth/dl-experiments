@@ -4,10 +4,10 @@ from dataclasses import dataclass
 @dataclass
 class ModelConfig:
     vocab_size: int = 4096
-    context_length: int = 512
+    context_length: int = 256
     embedding_dim: int = 192
     num_heads: int = 6
-    num_blocks: int = 24
+    num_blocks: int = 12
     dropout: float = 0.1
     use_bias: bool = False
 
@@ -19,11 +19,11 @@ class ModelConfig:
 class TrainerConfig:
     device: str = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     
-    batch_size: int = 256
+    batch_size: int = 32
     learning_rate: float = 8e-4
-    max_steps: int = 50000
-    eval_interval: int = 1000
-    val_steps: int = 100
+    max_steps: int = 5000
+    eval_interval: int = 250
+    val_steps: int = 50
     save_path: str = "model.safetensors"
     
     weight_decay: float = 0.1

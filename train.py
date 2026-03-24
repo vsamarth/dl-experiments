@@ -55,6 +55,12 @@ def train(cfg: TrainerConfig):
     val_loader = DataLoader(StreamingStoryDataset(tok, m_cfg.context_length, "validation"), batch_size=cfg.batch_size)
     
     wandb.init(project="tiny-stories", config={**cfg.__dict__, **m_cfg.__dict__})
+    # Log tokenizer as an artifact
+    if os.path.exists("tokenizer.json"):
+        art = wandb.Artifact("tokenizer", type="model")
+        art.add_file("tokenizer.json")
+        wandb.log_artifact(art)
+    
     print(f"Training {sum(p.numel() for p in model.parameters())/1e6:.1f}M params")
 
     pbar = tqdm(range(cfg.max_steps), dynamic_ncols=True)
@@ -97,6 +103,11 @@ def train(cfg: TrainerConfig):
 
     finally:
         save_model(model, cfg.save_path)
+        # Log model as an artifact
+        if os.path.exists(cfg.save_path):
+            model_art = wandb.Artifact("model", type="model")
+            model_art.add_file(cfg.save_path)
+            wandb.log_artifact(model_art)
         wandb.finish()
 
 if __name__ == "__main__":
